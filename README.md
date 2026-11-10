@@ -42,4 +42,5 @@ dall'app, in Impostazioni → Utenti.
 
 ## Pubblicazione
 
-`npm run build` crea la cartella `dist/`, pubblicabile su Firebase Hosting o qualsiasi hosting statico.
+Ogni push su `main` compila l'app e la pubblica su GitHub Pages (`.github/workflows/deploy.yml`), all'indirizzo
+https://dashboardmovi.stefanobossolasco.me. In Settings → Pages la sorgente deve essere "GitHub Actions".
