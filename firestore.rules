@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Primo amministratore: puo' entrare anche a database vuoto.
+    function bootstrapAdmin() {
+      return 'stefano.bossolasco.01@gmail.com';
+    }
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function email() {
+      return request.auth.token.email;
+    }
+    function userPath() {
+      return /databases/$(database)/documents/users/$(email());
+    }
+    function isMember() {
+      return signedIn() && exists(userPath());
+    }
+    function isAdmin() {
+      return signedIn() && (
+        email() == bootstrapAdmin() ||
+        (exists(userPath()) && get(userPath()).data.role == 'admin')
+      );
+    }
+    // Collaboratore abilitato su un evento
+    function canEvent(eventId) {
+      return isMember() &&
+        email() in get(/databases/$(database)/documents/events/$(eventId)).data.collaborators;
+    }
+
+    match /users/{userEmail} {
+      allow get: if signedIn() && userEmail == email();
+      allow read, write: if isAdmin();
+    }
+
+    match /events/{eventId} {
+      allow read: if isAdmin() || (isMember() && email() in resource.data.collaborators);
+      allow write: if isAdmin();
+
+      match /participants/{participantId} {
+        allow read, write: if isAdmin() || canEvent(eventId);
+      }
+    }
+
+    match /movements/{movementId} {
+      allow read, write: if isAdmin();
+      // Il collaboratore vede le spese dei propri eventi e puo' aggiungerne;
+      // puo' correggere o eliminare solo quelle inserite da lui e non ancora riconciliate.
+      allow read: if resource.data.eventId is string && canEvent(resource.data.eventId);
+      allow create: if request.resource.data.eventId is string
+        && canEvent(request.resource.data.eventId)
+        && request.resource.data.type == 'uscita'
+        && request.resource.data.createdBy == email()
+        && !('bankTxId' in request.resource.data)
+        && !('invoiceId' in request.resource.data);
+      allow update: if resource.data.eventId is string
+        && canEvent(resource.data.eventId)
+        && resource.data.createdBy == email()
+        && request.resource.data.eventId == resource.data.eventId
+        && request.resource.data.type == 'uscita'
+        && request.resource.data.createdBy == email()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['bankTxId', 'invoiceId', 'subgroup', 'modD']);
+      allow delete: if resource.data.eventId is string
+        && canEvent(resource.data.eventId)
+        && resource.data.createdBy == email()
+        && !('bankTxId' in resource.data)
+        && !('invoiceId' in resource.data);
+    }
+
+    // Calendario, estratti conto, fatture, impostazioni: solo amministratori.
+    match /bookings/{id} { allow read, write: if isAdmin(); }
+    match /bankTx/{id} { allow read, write: if isAdmin(); }
+    match /invoices/{id} { allow read, write: if isAdmin(); }
+    match /settings/{id} { allow read, write: if isAdmin(); }
+  }
+}
